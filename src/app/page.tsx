@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -9,31 +9,36 @@ import {
 } from "@/components/FashionIcons";
 import { ExternalLink, RefreshCw, Sparkles, AlertCircle } from "lucide-react";
 
+const INITIAL_ENGLISH_REVIEW =
+  "Found a wonderful collection of women's wear at ANUPAMA FASHION in Kudasan! Loved the quality and unique variety of one-piece and two-piece outfits. Great fitting and very comfortable shopping experience in Gandhinagar.";
+
+const INITIAL_GUJARATI_REVIEW =
+  "ANUPAMA FASHION Kudasan ma shopping karvano experience ghano saro rahyo. Women's clothing ma one-piece ane two-piece collection ni variety ghani sari che. Quality ane fitting ekdam perfect che!";
+
 export default function Home() {
   const [selectedLanguage, setSelectedLanguage] = useState<"English" | "Gujarati">("English");
-  const [reviewDraft, setReviewDraft] = useState<string>("");
-  const [isGenerating, setIsGenerating] = useState<boolean>(true);
+  const [reviewDraft, setReviewDraft] = useState<string>(INITIAL_ENGLISH_REVIEW);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   const activeRequestRef = useRef<boolean>(false);
-  const initialGeneratedRef = useRef<boolean>(false);
 
   const googleReviewUrl = "https://g.page/r/CWzrHhE76rD0EBE/review";
   const instagramUrl = "https://www.instagram.com/flashdesign_ai/";
 
-  // Fast single-execution review generator with lock to prevent duplicate simultaneous calls
+  // Fast review generator with lock to prevent duplicate simultaneous calls
   const generateReview = useCallback(async (lang: "English" | "Gujarati") => {
     if (activeRequestRef.current) return;
     activeRequestRef.current = true;
 
     setIsGenerating(true);
     setErrorMessage("");
-    setReviewDraft("");
 
     try {
       const response = await fetch("/api/generate-review", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify({
           language: lang,
         }),
@@ -44,7 +49,7 @@ export default function Home() {
       if (data.success && data.reviewText) {
         setReviewDraft(data.reviewText);
       } else {
-        setErrorMessage(data.error || "Failed to save review to database.");
+        setErrorMessage(data.error || "Failed to generate review.");
       }
     } catch (error: any) {
       console.error("Failed to generate and insert review:", error);
@@ -55,17 +60,14 @@ export default function Home() {
     }
   }, []);
 
-  // Initial Page Load Generation - Triggers immediately once on mount
-  useEffect(() => {
-    if (!initialGeneratedRef.current) {
-      initialGeneratedRef.current = true;
-      generateReview("English");
-    }
-  }, [generateReview]);
-
   const handleLanguageChange = (lang: "English" | "Gujarati") => {
     if (lang !== selectedLanguage && !isGenerating) {
       setSelectedLanguage(lang);
+      if (lang === "English") {
+        setReviewDraft(INITIAL_ENGLISH_REVIEW);
+      } else {
+        setReviewDraft(INITIAL_GUJARATI_REVIEW);
+      }
       generateReview(lang);
     }
   };
@@ -95,7 +97,7 @@ export default function Home() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.4 }}
             className="relative mb-5 p-4 rounded-3xl logo-hero-frame"
           >
             <div className="relative w-48 h-48 sm:w-56 sm:h-56 mx-auto flex items-center justify-center">
@@ -113,7 +115,7 @@ export default function Home() {
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.15 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
             className="space-y-1.5 text-center"
           >
             <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold bg-boutique-surfaceWarm border border-boutique-borderGold text-boutique-goldMuted uppercase tracking-widest">
@@ -133,7 +135,7 @@ export default function Home() {
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
+            transition={{ duration: 0.4, delay: 0.15 }}
             className="space-y-1.5"
           >
             <label className="block text-[11px] uppercase tracking-wider text-boutique-textMuted text-center font-medium">
@@ -154,6 +156,7 @@ export default function Home() {
               >
                 English
               </button>
+
               <button
                 type="button"
                 onClick={() => handleLanguageChange("Gujarati")}
@@ -169,86 +172,91 @@ export default function Home() {
             </div>
           </motion.div>
 
-          {/* LOADING STATE OR GENERATED REVIEW CARD DISPLAY */}
-          <AnimatePresence mode="wait">
-            {isGenerating ? (
-              <motion.div
-                key="loading"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                className="p-8 rounded-2xl glass-card-light space-y-3 shadow-card-light text-center flex flex-col items-center justify-center min-h-[160px]"
-              >
-                <RefreshCw className="w-6 h-6 animate-spin text-boutique-goldMuted mb-1" />
-                <p className="text-sm font-serif font-medium text-boutique-goldMuted tracking-wide">
-                  Preparing your review...
-                </p>
-              </motion.div>
-            ) : errorMessage ? (
-              <motion.div
-                key="error"
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="p-5 rounded-2xl bg-amber-50 border border-amber-200 space-y-3 shadow-card-light text-center"
-              >
-                <AlertCircle className="w-6 h-6 text-amber-600 mx-auto" />
-                <p className="text-xs text-amber-900 font-medium leading-relaxed">
-                  {errorMessage}
-                </p>
-                <button
-                  type="button"
-                  onClick={handleGenerateAnother}
-                  className="py-2.5 px-4 rounded-xl text-xs font-semibold bg-amber-600 text-white shadow-sm hover:bg-amber-700 transition-colors"
+          {/* GENERATED REVIEW CARD / LOADING / ERROR DISPLAY */}
+          <div className="relative">
+            <AnimatePresence mode="wait">
+              {isGenerating ? (
+                /* LOADING STATE CARD */
+                <motion.div
+                  key="loading"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="p-8 rounded-2xl glass-card-light space-y-3 shadow-card-light text-center flex flex-col items-center justify-center min-h-[160px]"
                 >
-                  Retry Generation
-                </button>
-              </motion.div>
-            ) : reviewDraft ? (
-              <motion.div
-                key={reviewDraft}
-                initial={{ opacity: 0, scale: 0.97, y: 12 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.97, y: -12 }}
-                transition={{ duration: 0.35 }}
-                className="p-4.5 sm:p-5 rounded-2xl glass-card-light space-y-4 shadow-card-light relative"
-              >
-                {/* 1. Generated Review Text Box - Clean Sans-Serif (16px mobile / 17px desktop, 1.6 line-height, weight 400, no italics, no quotes) */}
-                <div className="p-4 sm:p-4.5 rounded-xl bg-white border border-boutique-borderGold/60 shadow-sm">
-                  <p className="text-[16px] sm:text-[17px] font-sans font-normal not-italic text-boutique-textPrimary leading-[1.6] tracking-normal text-left">
-                    {reviewDraft}
+                  <RefreshCw className="w-6 h-6 animate-spin text-boutique-goldMuted mb-1" />
+                  <p className="text-sm font-serif font-medium text-boutique-goldMuted tracking-wide">
+                    Creating your fresh AI review...
                   </p>
-                </div>
-
-                {/* 2. BUTTON ORDER: [ POST REVIEW ON GOOGLE ] then [ GENERATE ANOTHER REVIEW ] */}
-                <div className="pt-1 space-y-2.5">
-                  {/* Button 1: POST REVIEW ON GOOGLE */}
-                  <button
-                    type="button"
-                    onClick={handlePostToGoogle}
-                    className="w-full py-4 px-6 rounded-2xl font-bold text-sm bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 text-white shadow-lg hover:brightness-105 active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2.5 cursor-pointer uppercase tracking-wider"
-                  >
-                    <span>Post Review on Google</span>
-                    <ExternalLink className="w-4 h-4" />
-                  </button>
-
-                  {/* Button 2: GENERATE ANOTHER REVIEW */}
+                </motion.div>
+              ) : errorMessage ? (
+                /* ERROR STATE CARD */
+                <motion.div
+                  key="error"
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="p-5 rounded-2xl bg-amber-50 border border-amber-200 space-y-3 shadow-card-light text-center"
+                >
+                  <AlertCircle className="w-6 h-6 text-amber-600 mx-auto" />
+                  <p className="text-xs text-amber-900 font-medium leading-relaxed">
+                    {errorMessage}
+                  </p>
                   <button
                     type="button"
                     onClick={handleGenerateAnother}
-                    disabled={isGenerating}
-                    className="w-full py-3.5 px-6 rounded-2xl font-semibold text-sm bg-white border border-boutique-borderGold text-boutique-goldMuted shadow-sm hover:bg-boutique-surfaceWarm hover:text-boutique-gold font-serif transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider"
+                    className="py-2.5 px-4 rounded-xl text-xs font-semibold bg-amber-600 text-white shadow-sm hover:bg-amber-700 transition-colors cursor-pointer"
                   >
-                    <Sparkles className="w-4 h-4 text-boutique-gold" />
-                    <span>Generate Another Review</span>
+                    Retry Generation
                   </button>
-                </div>
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
+                </motion.div>
+              ) : (
+                /* GENERATED REVIEW CARD & ACTION BUTTONS */
+                <motion.div
+                  key="review"
+                  initial={{ opacity: 0, scale: 0.98, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-4"
+                >
+                  {/* Modern, Clean Sans-Serif Highly Readable Review Box */}
+                  <div className="p-6 rounded-2xl bg-white border border-boutique-borderGold shadow-card-light relative">
+                    <p className="text-base sm:text-[17px] leading-[1.6] text-boutique-textPrimary font-sans font-normal tracking-normal select-all">
+                      {reviewDraft}
+                    </p>
+                  </div>
+
+                  {/* EXACT ORDER OF BUTTONS: 1. POST REVIEW ON GOOGLE (Primary) -> 2. GENERATE ANOTHER REVIEW (Secondary) */}
+                  <div className="space-y-2.5 pt-1">
+                    {/* PRIMARY ACTION BUTTON: POST REVIEW ON GOOGLE */}
+                    <button
+                      type="button"
+                      onClick={handlePostToGoogle}
+                      className="w-full py-4 px-6 rounded-2xl font-serif font-semibold text-base shadow-gold-btn hover:brightness-105 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer bg-gold-gradient text-white border border-boutique-gold/30"
+                    >
+                      <Sparkles className="w-5 h-5 text-white animate-pulse" />
+                      POST REVIEW ON GOOGLE
+                      <ExternalLink className="w-4 h-4 text-white/90" />
+                    </button>
+
+                    {/* SECONDARY ACTION BUTTON: GENERATE ANOTHER REVIEW */}
+                    <button
+                      type="button"
+                      onClick={handleGenerateAnother}
+                      disabled={isGenerating}
+                      className="w-full py-3.5 px-6 rounded-2xl font-serif font-semibold text-sm transition-all flex items-center justify-center gap-2 cursor-pointer bg-white text-boutique-goldMuted border border-boutique-borderGold hover:bg-boutique-surfaceWarm hover:text-boutique-textPrimary shadow-card-light active:scale-[0.99]"
+                    >
+                      <RefreshCw className="w-4 h-4 text-boutique-goldMuted" />
+                      GENERATE ANOTHER REVIEW
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </section>
       </main>
 
-      {/* FOOTER */}
+      {/* 3. ELEGANT BOUTIQUE FOOTER */}
       <footer className="w-full py-5 border-t border-boutique-borderGold bg-white/80 backdrop-blur-md relative z-10 text-center text-xs text-boutique-textSecondary">
         <div className="max-w-md mx-auto px-4 flex flex-col items-center justify-center gap-1">
           <p className="tracking-wide font-medium">
@@ -263,8 +271,9 @@ export default function Home() {
               <ExternalLink className="w-3 h-3" />
             </a>
           </p>
+
           <p className="text-[10px] text-boutique-textMuted">
-            ANUPAMA FASHION &copy; {new Date().getFullYear()} &bull; Women's Clothing Boutique
+            ANUPAMA FASHION &copy; {new Date().getFullYear()} &bull; Women&apos;s Clothing Boutique
           </p>
         </div>
       </footer>

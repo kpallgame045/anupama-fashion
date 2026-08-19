@@ -3,18 +3,25 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getAllHistoricalReviews, saveAcceptedReview } from "@/lib/supabase";
 import { isReviewSimilar } from "@/lib/similarity";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { language = "English" } = body;
     const dbLanguage: "english" | "gujarati" = language.toLowerCase() === "gujarati" ? "gujarati" : "english";
 
-    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+      process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
     const modelName = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
 
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "GEMINI_API_KEY is not configured in .env.local" },
+        { success: false, error: "GEMINI_API_KEY is not configured in environment" },
         { status: 500 }
       );
     }
@@ -138,14 +145,21 @@ ${attempts > 1 ? `NOTE: Previous attempt was too similar to historical database 
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      reviewText: acceptedDraft,
-      language: dbLanguage,
-      insertedRow: saveResult.data,
-      attemptsUsed: attempts,
-      modelUsed: modelName,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        reviewText: acceptedDraft,
+        language: dbLanguage,
+        insertedRow: saveResult.data,
+        attemptsUsed: attempts,
+        modelUsed: modelName,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        },
+      }
+    );
   } catch (error: any) {
     console.error("Error in generate-review API route:", error);
     return NextResponse.json(
