@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -9,31 +9,27 @@ import {
 } from "@/components/FashionIcons";
 import { ExternalLink, RefreshCw, Sparkles, AlertCircle, Check } from "lucide-react";
 
-const INITIAL_ENGLISH_REVIEW =
-  "Found a wonderful collection of women's wear at ANUPAMA FASHION in Kudasan! Loved the quality and unique variety of one-piece and two-piece outfits. Great fitting and very comfortable shopping experience in Gandhinagar.";
-
-const INITIAL_GUJARATI_REVIEW =
-  "ANUPAMA FASHION Kudasan ma shopping karvano experience ghano saro rahyo. Women's clothing ma one-piece ane two-piece collection ni variety ghani sari che. Quality ane fitting ekdam perfect che!";
-
 export default function Home() {
   const [selectedLanguage, setSelectedLanguage] = useState<"English" | "Gujarati">("English");
-  const [reviewDraft, setReviewDraft] = useState<string>(INITIAL_ENGLISH_REVIEW);
-  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [reviewDraft, setReviewDraft] = useState<string>("");
+  const [isGenerating, setIsGenerating] = useState<boolean>(true);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [copiedToast, setCopiedToast] = useState<boolean>(false);
 
   const activeRequestRef = useRef<boolean>(false);
+  const initialGeneratedRef = useRef<boolean>(false);
 
   const googleReviewUrl = "https://g.page/r/CWzrHhE76rD0EBE/review";
   const instagramUrl = "https://www.instagram.com/flashdesign_ai/";
 
-  // Fast review generator with lock to prevent duplicate simultaneous calls
+  // Real Gemini API Review Generator — strictly calls backend API
   const generateReview = useCallback(async (lang: "English" | "Gujarati") => {
     if (activeRequestRef.current) return;
     activeRequestRef.current = true;
 
     setIsGenerating(true);
     setErrorMessage("");
+    setReviewDraft("");
 
     try {
       const response = await fetch("/api/generate-review", {
@@ -50,25 +46,28 @@ export default function Home() {
       if (data.success && data.reviewText) {
         setReviewDraft(data.reviewText);
       } else {
-        setErrorMessage(data.error || "Failed to generate review.");
+        setErrorMessage(data.error || "Failed to generate review from Gemini API.");
       }
     } catch (error: any) {
-      console.error("Failed to generate and insert review:", error);
-      setErrorMessage(error.message || "Network error during review generation.");
+      console.error("Failed to generate review:", error);
+      setErrorMessage(error.message || "Network error during Gemini API call.");
     } finally {
       setIsGenerating(false);
       activeRequestRef.current = false;
     }
   }, []);
 
+  // Initial Page Load — Always calls real Gemini API immediately on mount
+  useEffect(() => {
+    if (!initialGeneratedRef.current) {
+      initialGeneratedRef.current = true;
+      generateReview("English");
+    }
+  }, [generateReview]);
+
   const handleLanguageChange = (lang: "English" | "Gujarati") => {
     if (lang !== selectedLanguage && !isGenerating) {
       setSelectedLanguage(lang);
-      if (lang === "English") {
-        setReviewDraft(INITIAL_ENGLISH_REVIEW);
-      } else {
-        setReviewDraft(INITIAL_GUJARATI_REVIEW);
-      }
       generateReview(lang);
     }
   };
@@ -83,14 +82,12 @@ export default function Home() {
   const handlePostToGoogle = async () => {
     if (!reviewDraft) return;
 
-    // 1. Immediately copy the EXACT currently displayed review to clipboard
     let copySuccess = false;
     try {
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(reviewDraft);
         copySuccess = true;
       } else {
-        // Fallback for older mobile browsers or webviews
         const textArea = document.createElement("textarea");
         textArea.value = reviewDraft;
         textArea.style.position = "fixed";
@@ -120,13 +117,11 @@ export default function Home() {
       }
     }
 
-    // 2. Show instant confirmation badge
     setCopiedToast(true);
     setTimeout(() => {
       setCopiedToast(false);
     }, 3500);
 
-    // 3. Automatically open Google Review URL in new tab directly within user click handler
     window.open(googleReviewUrl, "_blank", "noopener,noreferrer");
   };
 
@@ -234,7 +229,7 @@ export default function Home() {
                 >
                   <RefreshCw className="w-6 h-6 animate-spin text-boutique-goldMuted mb-1" />
                   <p className="text-sm font-serif font-medium text-boutique-goldMuted tracking-wide">
-                    Creating your fresh AI review...
+                    Generating unique review via Gemini AI...
                   </p>
                 </motion.div>
               ) : errorMessage ? (

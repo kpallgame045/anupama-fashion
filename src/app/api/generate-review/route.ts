@@ -35,58 +35,61 @@ export async function POST(request: NextRequest) {
     try {
       model = genAI.getGenerativeModel({ model: modelName });
     } catch {
-      model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     }
 
     const isGujarati = dbLanguage === "gujarati";
 
     const languageInstruction = isGujarati
-      ? `STRICT REQUIREMENT: Write in GUJARATI language using ONLY ENGLISH / ROMAN ALPHABET LETTERS.
-DO NOT use Gujarati script or Unicode characters (STRICTLY NO કેમ છો).
-Write naturally like how a Gujarati customer types Gujarati on WhatsApp with English letters.
-Example style ONLY: "Shopping mate aavi hati ane ahiya collection ni variety mane ghani game. One-piece ane two-piece ma pan sara options jova malya. Designs modern hata ane overall shopping experience comfortable rahyo. Kudasan ma women's clothing mate aa place par visit karvano experience saro lagyo."
-DO NOT force "Kem cho" at the beginning of every review.`
-      : `Write natural Indian English. Keep it realistic, descriptive, and comfortable.
-Example style ONLY: "Was looking for something nice for an upcoming occasion and found quite a few good options here. The collection has a nice mix of modern designs, and I liked the variety available. The overall shopping experience at ANUPAMA FASHION in Kudasan was comfortable and pleasant."`;
+      ? `STRICT LANGUAGE REQUIREMENT:
+- Write in GUJARATI language using ONLY ENGLISH / ROMAN ALPHABET LETTERS (WhatsApp style Gujarati).
+- DO NOT use Gujarati Unicode script (NO કેમ છો).
+- DO NOT force "Kem cho" or repetitive greetings.`
+      : `STRICT LANGUAGE REQUIREMENT:
+- Write natural Indian English as typed by a real customer.`;
 
     let acceptedDraft = "";
     let attempts = 0;
-    const maxAttempts = 5;
+    const maxAttempts = 15;
     let lastGeminiError = "";
 
     while (attempts < maxAttempts) {
       attempts++;
 
-      const prompt = `You are an AI assistant generating ONE natural, original Google review DRAFT for a real customer of ANUPAMA FASHION.
+      const prompt = `You are a real customer writing ONE unique Google review for ANUPAMA FASHION.
 
-BUSINESS DETAILS:
-Name: ANUPAMA FASHION
-Category: Women's Clothing & Boutique
-Location: 1st Floor, Siddhraj Z Square, E-104, Opposite The Landmark, Kudasan, Gandhinagar, Gujarat 382419.
-Products: One-Piece, Two-Piece, Women's Wear, Fashion Collections, Western & Ethnic Wear.
+STORE DETAILS:
+- Name: ANUPAMA FASHION
+- Category: Women's Clothing & Boutique
+- Location: Kudasan, Gandhinagar, Gujarat.
+- Offerings: One-Piece dresses, Two-Piece co-ords, Western wear, Ethnic wear, Fashion collections.
 
-LANGUAGE RULE:
 ${languageInstruction}
 
-REVIEW LENGTH RULE (CRITICAL):
-- Target length: APPROXIMATELY 45 TO 70 WORDS.
-- Must feel like a detailed, genuine customer-written Google review (NOT an advertisement or SEO article).
+REVIEW LENGTH:
+- Must be between 45 and 70 words.
 
-LOCAL & NATURAL SEO:
-- Naturally incorporate relevant terms when appropriate (e.g. "ANUPAMA FASHION", "Kudasan", "Gandhinagar", "women's clothing", "one-piece", "two-piece", "quality", "variety").
-- DO NOT force all keywords into every review. DO NOT keyword-stuff.
-- DO NOT repeat the full street address in every review. Naturally mention "Kudasan" or "Gandhinagar" when appropriate.
+STRICT OPENING & DIVERSITY RULES (CRITICAL):
+- ABSOLUTELY FORBIDDEN OPENING PHRASES (DO NOT START WITH ANY OF THESE):
+  * "Finding..." / "Finding a..." / "Finding the..."
+  * "Stumbled upon..." / "I stumbled upon..."
+  * "Finally found..." / "Finally managed..."
+  * "Was looking for..." / "I was looking..."
+  * "Visited ANUPAMA FASHION..." / "I visited..."
+  * "ANUPAMA FASHION is..." / "ANUPAMA FASHION in Kudasan..."
 
-FIRST LINE & STRUCTURE VARIATION (CRITICAL):
-- Create a brand-new, unique opening sentence every single time.
-- NEVER start repeatedly with "Visited ANUPAMA FASHION...", "I visited...", "The collection...", "Kudasan...", "Kem cho...", or "ANUPAMA FASHION...".
-- Vary the focus: some reviews focus on finding an outfit for an occasion, some on fabric quality & fitting, some on collection variety, some on store atmosphere.
+- RANDOMIZE YOUR OPENING ANGLE:
+  * Option A: Start by complimenting the fitting or fabric quality.
+  * Option B: Start by describing how an outfit looked at an event.
+  * Option C: Start by praising the boutique's unique collection variety.
+  * Option D: Start by recommending the store to anyone in Kudasan or Gandhinagar.
+  * Option E: Start with a personal shopping experience compliment.
 
-SAFETY & REALISM:
-- Do NOT fabricate specific purchases, staff names, fake prices, discounts, or offers.
-- Output ONLY the plain text review draft. Do NOT include quotation marks, titles, bullet points, hashtags, emojis, or explanations.
+OUTPUT FORMAT:
+- Output ONLY the plain text review draft.
+- DO NOT include quotation marks, titles, headers, bullet points, hashtags, emojis, or explanations.
 
-${attempts > 1 ? `NOTE: Previous attempt was too similar to historical database reviews. Generate a completely different opening and sentence structure this time (attempt ${attempts}).` : ""}
+${attempts > 1 ? `IMPORTANT: Previous attempt ${attempts - 1} was too similar to database records. Make this draft 100% distinct in opening, sentence structure, and vocabulary.` : ""}
 `;
 
       try {
@@ -103,7 +106,7 @@ ${attempts > 1 ? `NOTE: Previous attempt was too similar to historical database 
         console.error(`Gemini API Error on attempt ${attempts}:`, genError);
         lastGeminiError = genError.message || JSON.stringify(genError);
         try {
-          const fallbackModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+          const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
           const result = await fallbackModel.generateContent(prompt);
           const responseText = result.response.text().trim().replace(/^["']|["']$/g, "");
           const similarityCheck = isReviewSimilar(responseText, historicalReviews);

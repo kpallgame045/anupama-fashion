@@ -12,6 +12,27 @@ export function normalizeText(text: string): string {
 }
 
 /**
+ * Common generic customer review phrases to exclude from trigram phrase overlap detection
+ * so genuine Gemini reviews are not penalized for using natural shopping terms.
+ */
+const GENERIC_COMMON_PHRASES = [
+  "anupama fashion",
+  "kudasan gandhinagar",
+  "womens clothing",
+  "fabric quality",
+  "western and ethnic",
+  "ethnic and western",
+  "coord set",
+  "one piece",
+  "two piece",
+  "highly recommend",
+  "shopping experience",
+  "collection is",
+  "quality is",
+  "fitting is",
+];
+
+/**
  * Tokenize text into n-grams (default 3-word grams for phrase matching).
  */
 export function getNGrams(text: string, n: number = 3): Set<string> {
@@ -24,7 +45,17 @@ export function getNGrams(text: string, n: number = 3): Set<string> {
   }
 
   for (let i = 0; i <= words.length - n; i++) {
-    nGrams.add(words.slice(i, i + n).join(" "));
+    const gram = words.slice(i, i + n).join(" ");
+    let isGeneric = false;
+    for (const common of GENERIC_COMMON_PHRASES) {
+      if (gram.includes(common)) {
+        isGeneric = true;
+        break;
+      }
+    }
+    if (!isGeneric) {
+      nGrams.add(gram);
+    }
   }
 
   return nGrams;
@@ -109,7 +140,7 @@ export function isReviewSimilar(
   for (const existingText of historicalReviews) {
     const normExisting = normalizeText(existingText);
 
-    // 1. Exact or normalized duplicate check
+    // 1. Exact or normalized duplicate check (Check against ALL historical reviews)
     if (normNew === normExisting) {
       return {
         isDuplicateOrSimilar: true,
@@ -118,7 +149,7 @@ export function isReviewSimilar(
       };
     }
 
-    // 2. Check identical opening phrase (first 4 words)
+    // 2. Check identical opening phrase (first 4 words) (Check against ALL historical reviews)
     if (checkOpeningSimilarity(newReviewText, existingText)) {
       return {
         isDuplicateOrSimilar: true,
@@ -127,7 +158,7 @@ export function isReviewSimilar(
       };
     }
 
-    // 3. Complete sentence overlap check
+    // 3. Complete sentence overlap check (Check against ALL historical reviews)
     if (checkSentenceOverlap(newReviewText, existingText)) {
       return {
         isDuplicateOrSimilar: true,
@@ -136,7 +167,7 @@ export function isReviewSimilar(
       };
     }
 
-    // 4. Trigram Jaccard Similarity (Phrase overlap)
+    // 4. Trigram Jaccard Similarity (Distinct phrase overlap)
     const existingTrigrams = getNGrams(existingText, 3);
     const triScore = jaccardSimilarity(newTrigrams, existingTrigrams);
 
@@ -149,8 +180,8 @@ export function isReviewSimilar(
       maxScore = overallScore;
     }
 
-    // Rejection threshold: > 0.45 trigram/phrase overlap is considered too similar
-    if (triScore > 0.35) {
+    // Rejection threshold for unique phrase overlap
+    if (triScore > 0.50) {
       return {
         isDuplicateOrSimilar: true,
         reason: `High phrase overlap score (${triScore.toFixed(2)})`,
