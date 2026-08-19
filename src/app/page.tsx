@@ -7,7 +7,7 @@ import {
   FabricSparkleIcon,
   GoldFlourishDivider,
 } from "@/components/FashionIcons";
-import { ExternalLink, RefreshCw, Sparkles, AlertCircle } from "lucide-react";
+import { ExternalLink, RefreshCw, Sparkles, AlertCircle, Check } from "lucide-react";
 
 const INITIAL_ENGLISH_REVIEW =
   "Found a wonderful collection of women's wear at ANUPAMA FASHION in Kudasan! Loved the quality and unique variety of one-piece and two-piece outfits. Great fitting and very comfortable shopping experience in Gandhinagar.";
@@ -20,6 +20,7 @@ export default function Home() {
   const [reviewDraft, setReviewDraft] = useState<string>(INITIAL_ENGLISH_REVIEW);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [copiedToast, setCopiedToast] = useState<boolean>(false);
 
   const activeRequestRef = useRef<boolean>(false);
 
@@ -78,7 +79,54 @@ export default function Home() {
     }
   };
 
-  const handlePostToGoogle = () => {
+  // Bulletproof Click-to-Copy & Redirect Handler for Mobile & Desktop
+  const handlePostToGoogle = async () => {
+    if (!reviewDraft) return;
+
+    // 1. Immediately copy the EXACT currently displayed review to clipboard
+    let copySuccess = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(reviewDraft);
+        copySuccess = true;
+      } else {
+        // Fallback for older mobile browsers or webviews
+        const textArea = document.createElement("textarea");
+        textArea.value = reviewDraft;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        copySuccess = document.execCommand("copy");
+        document.body.removeChild(textArea);
+      }
+    } catch (err) {
+      console.error("Primary clipboard write error:", err);
+      try {
+        const textArea = document.createElement("textarea");
+        textArea.value = reviewDraft;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        copySuccess = document.execCommand("copy");
+        document.body.removeChild(textArea);
+      } catch {
+        copySuccess = false;
+      }
+    }
+
+    // 2. Show instant confirmation badge
+    setCopiedToast(true);
+    setTimeout(() => {
+      setCopiedToast(false);
+    }, 3500);
+
+    // 3. Automatically open Google Review URL in new tab directly within user click handler
     window.open(googleReviewUrl, "_blank", "noopener,noreferrer");
   };
 
@@ -225,6 +273,21 @@ export default function Home() {
                     </p>
                   </div>
 
+                  {/* Temporary Toast Banner upon Copying */}
+                  <AnimatePresence>
+                    {copiedToast && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                        className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium text-center flex items-center justify-center gap-2 shadow-sm"
+                      >
+                        <Check className="w-4 h-4 text-emerald-600" />
+                        Review copied to clipboard — paste it on Google!
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   {/* EXACT ORDER OF BUTTONS: 1. POST REVIEW ON GOOGLE (Primary) -> 2. GENERATE ANOTHER REVIEW (Secondary) */}
                   <div className="space-y-2.5 pt-1">
                     {/* PRIMARY ACTION BUTTON: POST REVIEW ON GOOGLE */}
@@ -233,9 +296,18 @@ export default function Home() {
                       onClick={handlePostToGoogle}
                       className="w-full py-4 px-6 rounded-2xl font-serif font-semibold text-base shadow-gold-btn hover:brightness-105 active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer bg-gold-gradient text-white border border-boutique-gold/30"
                     >
-                      <Sparkles className="w-5 h-5 text-white animate-pulse" />
-                      POST REVIEW ON GOOGLE
-                      <ExternalLink className="w-4 h-4 text-white/90" />
+                      {copiedToast ? (
+                        <>
+                          <Check className="w-5 h-5 text-white animate-bounce" />
+                          REVIEW COPIED! OPENING GOOGLE...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-5 h-5 text-white animate-pulse" />
+                          POST REVIEW ON GOOGLE
+                          <ExternalLink className="w-4 h-4 text-white/90" />
+                        </>
+                      )}
                     </button>
 
                     {/* SECONDARY ACTION BUTTON: GENERATE ANOTHER REVIEW */}
