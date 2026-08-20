@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
 
     if (!apiKey) {
       return NextResponse.json(
-        { success: false, error: "GEMINI_API_KEY is not configured in environment" },
+        { success: false, error: "GEMINI_API_KEY is not configured in Vercel environment" },
         { status: 500 }
       );
     }
@@ -29,14 +29,17 @@ export async function POST(request: NextRequest) {
     // 1. Fetch ALL previous reviews from public.reviews
     const { reviews: historicalReviews } = await getAllHistoricalReviews();
 
+    // Take recent reviews to pass to Gemini as negative examples (DO NOT REPEAT)
+    const recentSample = historicalReviews.slice(-15);
+    const doNotRepeatSnippet =
+      recentSample.length > 0
+        ? `PREVIOUS REVIEWS ALREADY WRITTEN (DO NOT COPY, REPEAT, OR IMITATE ANY OF THESE):\n${recentSample
+            .map((r, i) => `${i + 1}. "${r}"`)
+            .join("\n")}`
+        : "";
+
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    let model;
-    try {
-      model = genAI.getGenerativeModel({ model: modelName });
-    } catch {
-      model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-    }
+    const model = genAI.getGenerativeModel({ model: modelName });
 
     const isGujarati = dbLanguage === "gujarati";
 
@@ -50,11 +53,20 @@ export async function POST(request: NextRequest) {
 
     let acceptedDraft = "";
     let attempts = 0;
-    const maxAttempts = 15;
+    const maxAttempts = 10;
     let lastGeminiError = "";
+
+    const openingAngles = [
+      "Focus on the luxurious fabric quality and comfortable fitting of a two-piece co-ord set.",
+      "Focus on how an outfit from this store received compliments at a recent party or family event.",
+      "Focus on praising the store's unique range of one-piece dresses and western wear in Kudasan.",
+      "Focus on recommending this boutique to anyone visiting Gandhinagar for trendy women's wear.",
+      "Focus on the friendly staff assistance and pleasant overall shopping ambiance.",
+    ];
 
     while (attempts < maxAttempts) {
       attempts++;
+      const currentAngle = openingAngles[(attempts - 1) % openingAngles.length];
 
       const prompt = `You are a real customer writing ONE unique Google review for ANUPAMA FASHION.
 
@@ -69,6 +81,9 @@ ${languageInstruction}
 REVIEW LENGTH:
 - Must be between 45 and 70 words.
 
+OPENING ANGLE FOR THIS DRAFT:
+- ${currentAngle}
+
 STRICT OPENING & DIVERSITY RULES (CRITICAL):
 - ABSOLUTELY FORBIDDEN OPENING PHRASES (DO NOT START WITH ANY OF THESE):
   * "Finding..." / "Finding a..." / "Finding the..."
@@ -78,18 +93,13 @@ STRICT OPENING & DIVERSITY RULES (CRITICAL):
   * "Visited ANUPAMA FASHION..." / "I visited..."
   * "ANUPAMA FASHION is..." / "ANUPAMA FASHION in Kudasan..."
 
-- RANDOMIZE YOUR OPENING ANGLE:
-  * Option A: Start by complimenting the fitting or fabric quality.
-  * Option B: Start by describing how an outfit looked at an event.
-  * Option C: Start by praising the boutique's unique collection variety.
-  * Option D: Start by recommending the store to anyone in Kudasan or Gandhinagar.
-  * Option E: Start with a personal shopping experience compliment.
+${doNotRepeatSnippet}
 
 OUTPUT FORMAT:
 - Output ONLY the plain text review draft.
 - DO NOT include quotation marks, titles, headers, bullet points, hashtags, emojis, or explanations.
 
-${attempts > 1 ? `IMPORTANT: Previous attempt ${attempts - 1} was too similar to database records. Make this draft 100% distinct in opening, sentence structure, and vocabulary.` : ""}
+${attempts > 1 ? `IMPORTANT: Previous attempt ${attempts - 1} was rejected for similarity to database records. Make this draft 100% distinct in opening, sentence structure, and vocabulary.` : ""}
 `;
 
       try {
@@ -101,24 +111,14 @@ ${attempts > 1 ? `IMPORTANT: Previous attempt ${attempts - 1} was too similar to
         if (!similarityCheck.isDuplicateOrSimilar) {
           acceptedDraft = responseText;
           break;
+        } else {
+          console.log(`[Attempt ${attempts}] Similarity Rejected: ${similarityCheck.reason}`);
         }
       } catch (genError: any) {
         console.error(`Gemini API Error on attempt ${attempts}:`, genError);
         lastGeminiError = genError.message || JSON.stringify(genError);
-        try {
-          const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-          const result = await fallbackModel.generateContent(prompt);
-          const responseText = result.response.text().trim().replace(/^["']|["']$/g, "");
-          const similarityCheck = isReviewSimilar(responseText, historicalReviews);
-          if (!similarityCheck.isDuplicateOrSimilar) {
-            acceptedDraft = responseText;
-            break;
-          }
-        } catch (fallbackError: any) {
-          console.error(`Fallback Gemini Model Error:`, fallbackError);
-          lastGeminiError = fallbackError.message || JSON.stringify(fallbackError);
-          break;
-        }
+        // If it's a real API key error or network failure, do not hide it
+        break;
       }
     }
 
