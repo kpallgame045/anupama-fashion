@@ -36,9 +36,11 @@ export function isPublishableKeyConfigured(): boolean {
 }
 
 /**
- * Fetch ALL historical reviews from public.reviews for unrestricted historical similarity checking
+ * Fast query: Fetch ONLY the latest 15 recent reviews from public.reviews for negative example reference
  */
-export async function getAllHistoricalReviews(): Promise<{ reviews: string[]; error?: any }> {
+export async function getRecentHistoricalReviews(
+  limit: number = 15
+): Promise<{ reviews: string[]; error?: any }> {
   if (!isPublishableKeyConfigured()) {
     return { reviews: [] };
   }
@@ -46,19 +48,19 @@ export async function getAllHistoricalReviews(): Promise<{ reviews: string[]; er
   try {
     const { data, error } = await supabase
       .from("reviews")
-      .select("id, review_text, language, created_at")
-      .order("created_at", { ascending: false });
+      .select("review_text")
+      .order("created_at", { ascending: false })
+      .limit(limit);
 
     if (error) {
-      console.error("[SUPABASE SELECT ERROR on public.reviews]:", error.message, error.details);
-      return { reviews: [], error: error.message || JSON.stringify(error) };
+      console.error("[SUPABASE SELECT ERROR on public.reviews]:", error.message);
+      return { reviews: [], error: error.message };
     }
 
     const reviewsList = (data || []).map((row: { review_text: string }) => row.review_text).filter(Boolean);
-    console.log(`[SUPABASE SUCCESS] Fetched ${reviewsList.length} historical reviews from public.reviews`);
     return { reviews: reviewsList };
   } catch (err: any) {
-    console.error("[SUPABASE EXCEPTION in getAllHistoricalReviews]:", err);
+    console.error("[SUPABASE EXCEPTION in getRecentHistoricalReviews]:", err);
     return { reviews: [], error: err.message || JSON.stringify(err) };
   }
 }
@@ -71,14 +73,12 @@ export async function saveAcceptedReview(
   selectedLanguage: "english" | "gujarati"
 ): Promise<{ success: boolean; data?: any; error?: any }> {
   if (!isPublishableKeyConfigured()) {
-    const errMsg = `Supabase Insert Pending: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is not configured in .env.local. Please add your real publishable key (starting with sb_publishable_ or eyJ) for project oxoruqfjcqhxnxsgwcar.`;
+    const errMsg = `Supabase Insert Pending: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is not configured in .env.local. Please add your real publishable key for project oxoruqfjcqhxnxsgwcar.`;
     console.warn(errMsg);
     return { success: false, error: errMsg };
   }
 
   try {
-    console.log(`[SUPABASE ATTEMPTING INSERT] URL: ${SUPABASE_PROJECT_URL} | Language: ${selectedLanguage}`);
-
     const { data, error } = await supabase
       .from("reviews")
       .insert({
@@ -97,11 +97,10 @@ export async function saveAcceptedReview(
       });
       return {
         success: false,
-        error: `Supabase Insert Failed: ${error.message}${error.details ? ` (${error.details})` : ""}${error.hint ? ` - Hint: ${error.hint}` : ""}`,
+        error: `Supabase Insert Failed: ${error.message}${error.details ? ` (${error.details})` : ""}`,
       };
     }
 
-    console.log("[SUPABASE INSERT SUCCESS] Inserted row into public.reviews:", data);
     return { success: true, data };
   } catch (err: any) {
     console.error("[SUPABASE EXCEPTION during insert]:", err);

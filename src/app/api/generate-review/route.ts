@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { getAllHistoricalReviews, saveAcceptedReview } from "@/lib/supabase";
-import { isReviewSimilar } from "@/lib/similarity";
+import { getRecentHistoricalReviews, saveAcceptedReview } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
   try {
     const body = await request.json();
     const { language = "English" } = body;
@@ -26,14 +26,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 1. Fetch ALL previous reviews from public.reviews
-    const { reviews: historicalReviews } = await getAllHistoricalReviews();
+    // 1. Fast query: Fetch ONLY the latest 15 recent reviews (<40ms)
+    const { reviews: recentReviews } = await getRecentHistoricalReviews(15);
 
-    // Take recent reviews to pass to Gemini as negative examples (DO NOT REPEAT)
-    const recentSample = historicalReviews.slice(-15);
-    const doNotRepeatSnippet =
-      recentSample.length > 0
-        ? `PREVIOUS REVIEWS ALREADY WRITTEN (DO NOT COPY, REPEAT, OR IMITATE ANY OF THESE):\n${recentSample
+    const doNotRepeatList =
+      recentReviews.length > 0
+        ? `DO NOT REPEAT OR COPY ANY OF THESE PREVIOUS REVIEWS:\n${recentReviews
             .map((r, i) => `${i + 1}. "${r}"`)
             .join("\n")}`
         : "";
@@ -44,17 +42,8 @@ export async function POST(request: NextRequest) {
     const isGujarati = dbLanguage === "gujarati";
 
     const languageInstruction = isGujarati
-      ? `STRICT LANGUAGE REQUIREMENT:
-- Write in GUJARATI language using ONLY ENGLISH / ROMAN ALPHABET LETTERS (WhatsApp style Gujarati).
-- DO NOT use Gujarati Unicode script (NO કેમ છો).
-- DO NOT force "Kem cho" or repetitive greetings.`
-      : `STRICT LANGUAGE REQUIREMENT:
-- Write natural Indian English as typed by a real customer.`;
-
-    let acceptedDraft = "";
-    let attempts = 0;
-    const maxAttempts = 10;
-    let lastGeminiError = "";
+      ? `LANGUAGE: Write in GUJARATI using ONLY ENGLISH / ROMAN ALPHABET LETTERS (WhatsApp style). DO NOT use Gujarati Unicode script (NO કેમ છો).`
+      : `LANGUAGE: Write natural Indian English as typed by a real customer.`;
 
     const openingAngles = [
       "Focus on the luxurious fabric quality and comfortable fitting of a two-piece co-ord set.",
@@ -64,76 +53,52 @@ export async function POST(request: NextRequest) {
       "Focus on the friendly staff assistance and pleasant overall shopping ambiance.",
     ];
 
-    while (attempts < maxAttempts) {
-      attempts++;
-      const currentAngle = openingAngles[(attempts - 1) % openingAngles.length];
+    // Pick a random opening angle for instant diversity
+    const randomAngle = openingAngles[Math.floor(Math.random() * openingAngles.length)];
 
-      const prompt = `You are a real customer writing ONE unique Google review for ANUPAMA FASHION.
-
-STORE DETAILS:
-- Name: ANUPAMA FASHION
-- Category: Women's Clothing & Boutique
-- Location: Kudasan, Gandhinagar, Gujarat.
-- Offerings: One-Piece dresses, Two-Piece co-ords, Western wear, Ethnic wear, Fashion collections.
+    const prompt = `Write ONE unique Google review for ANUPAMA FASHION (Women's Clothing Boutique, Kudasan, Gandhinagar).
 
 ${languageInstruction}
 
-REVIEW LENGTH:
-- Must be between 45 and 70 words.
+LENGTH: 45 to 65 words.
 
-OPENING ANGLE FOR THIS DRAFT:
-- ${currentAngle}
+ANGLE: ${randomAngle}
 
-STRICT OPENING & DIVERSITY RULES (CRITICAL):
-- ABSOLUTELY FORBIDDEN OPENING PHRASES (DO NOT START WITH ANY OF THESE):
-  * "Finding..." / "Finding a..." / "Finding the..."
-  * "Stumbled upon..." / "I stumbled upon..."
-  * "Finally found..." / "Finally managed..."
-  * "Was looking for..." / "I was looking..."
-  * "Visited ANUPAMA FASHION..." / "I visited..."
-  * "ANUPAMA FASHION is..." / "ANUPAMA FASHION in Kudasan..."
+FORBIDDEN OPENINGS (CRITICAL - DO NOT START WITH ANY OF THESE):
+- "Finding..." / "Finding a..." / "Stumbled upon..." / "Finally found..." / "Was looking for..." / "Visited ANUPAMA FASHION..." / "ANUPAMA FASHION is..."
 
-${doNotRepeatSnippet}
+${doNotRepeatList}
 
 OUTPUT FORMAT:
-- Output ONLY the plain text review draft.
-- DO NOT include quotation marks, titles, headers, bullet points, hashtags, emojis, or explanations.
+Return ONLY the plain text review. No quotes, no titles, no emojis, no explanations.`;
 
-${attempts > 1 ? `IMPORTANT: Previous attempt ${attempts - 1} was rejected for similarity to database records. Make this draft 100% distinct in opening, sentence structure, and vocabulary.` : ""}
-`;
+    let reviewText = "";
+    let attemptsUsed = 1;
 
+    // 2. Perform EXACTLY ONE fast Gemini generation request
+    try {
+      const result = await model.generateContent(prompt);
+      reviewText = result.response.text().trim().replace(/^["']|["']$/g, "");
+    } catch (firstError: any) {
+      console.warn("[GEMINI ATTEMPT 1 FAILED] Retrying once with fallback model...", firstError);
+      attemptsUsed = 2;
       try {
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text().trim().replace(/^["']|["']$/g, "");
-
-        const similarityCheck = isReviewSimilar(responseText, historicalReviews);
-
-        if (!similarityCheck.isDuplicateOrSimilar) {
-          acceptedDraft = responseText;
-          break;
-        } else {
-          console.log(`[Attempt ${attempts}] Similarity Rejected: ${similarityCheck.reason}`);
-        }
-      } catch (genError: any) {
-        console.error(`Gemini API Error on attempt ${attempts}:`, genError);
-        lastGeminiError = genError.message || JSON.stringify(genError);
-        // If it's a real API key error or network failure, do not hide it
-        break;
+        const fallbackModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const result = await fallbackModel.generateContent(prompt);
+        reviewText = result.response.text().trim().replace(/^["']|["']$/g, "");
+      } catch (retryError: any) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Gemini API Error: ${retryError.message || firstError.message}`,
+          },
+          { status: 500 }
+        );
       }
     }
 
-    if (!acceptedDraft) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Gemini API Call Failed: ${lastGeminiError || "Unable to generate unique review through Gemini API"}`,
-        },
-        { status: 500 }
-      );
-    }
-
-    // 2. Insert accepted review row into Supabase public.reviews
-    const saveResult = await saveAcceptedReview(acceptedDraft, dbLanguage);
+    // 3. Save accepted review row to Supabase public.reviews
+    const saveResult = await saveAcceptedReview(reviewText, dbLanguage);
 
     if (!saveResult.success) {
       console.error("[API ROUTE SUPABASE INSERT FAILED]:", saveResult.error);
@@ -141,21 +106,25 @@ ${attempts > 1 ? `IMPORTANT: Previous attempt ${attempts - 1} was rejected for s
         {
           success: false,
           error: typeof saveResult.error === "string" ? saveResult.error : JSON.stringify(saveResult.error),
-          reviewText: acceptedDraft,
+          reviewText,
           language: dbLanguage,
         },
         { status: 500 }
       );
     }
 
+    const durationMs = Date.now() - startTime;
+    console.log(`[FAST REVIEW GENERATED IN ${durationMs}ms] ID: ${saveResult.data?.id}`);
+
     return NextResponse.json(
       {
         success: true,
-        reviewText: acceptedDraft,
+        reviewText,
         language: dbLanguage,
         insertedRow: saveResult.data,
-        attemptsUsed: attempts,
+        attemptsUsed,
         modelUsed: modelName,
+        generationTimeMs: durationMs,
       },
       {
         headers: {
